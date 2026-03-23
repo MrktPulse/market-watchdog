@@ -7,95 +7,93 @@ import requests
 from streamlit_autorefresh import st_autorefresh
 from datetime import datetime
 
-# --- 1. CONFIG ---
-NTFY_TOPIC = "MrktPulse_Live_Sator__FFP_QTR" 
-
-# Refresh every 60 seconds
+# --- 1. CONFIG & REFRESH ---
+NTFY_TOPIC = "MrktPulse_Live_Sator__FFP_QTR"
 st_autorefresh(interval=60 * 1000, key="market_heartbeat")
 
-st.set_page_config(page_title="MarketPulse AI: Pro Watchdog", layout="wide")
+st.set_page_config(page_title="MarketPulse AI: Command Center", layout="wide")
 
-# Custom CSS to make it look "Finished" and Pro
+# Professional Dark Theme CSS
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
-    .stMetric { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 10px; }
+    div[data-testid="stMetricValue"] { font-size: 1.8rem; color: #00ffcc; }
+    .chart-container { border: 1px solid #30363d; border-radius: 10px; padding: 10px; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🛡️ MarketPulse AI: Autonomous Watchdog")
+# --- 2. DATA FUNCTIONS ---
+@st.cache_data(ttl=300)
+def get_top_movers():
+    # Pre-defined list of major global/Indian tickers to track for the leaderboard
+    watch_list = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "AAPL", "TSLA", "NVDA", "MSFT", "HDFCBANK.NS", "ICICIBANK.NS", "AMZN"]
+    data = yf.download(watch_list, period="1d", group_by='ticker')
+    movers = []
+    for t in watch_list:
+        try:
+            hist = data[t]
+            change = ((hist['Close'].iloc[-1] - hist['Open'].iloc[0]) / hist['Open'].iloc[0]) * 100
+            movers.append({"Ticker": t, "Price": round(hist['Close'].iloc[-1], 2), "Change": round(change, 2)})
+        except: continue
+    df_movers = pd.DataFrame(movers).sort_values(by="Change", ascending=False)
+    return df_movers
 
-# --- 2. THE FREE ALERT ENGINE ---
-def send_free_alert(title, message, priority="default"):
-    try:
-        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", 
-            data=message.encode('utf-8'),
-            headers={
-                "Title": title,
-                "Priority": priority,
-                "Tags": "chart_with_upwards_trend,warning"
-            })
-    except:
-        pass
+def run_monte_carlo(current_price, vol, days=7):
+    # 1000 random walks for the simulation part
+    sims = 1000
+    results = current_price * np.exp(np.cumsum(np.random.normal(0, vol, (sims, days)), axis=1))
+    return np.percentile(results[:, -1], [95, 50, 5]) # Bull, Base, Bear
 
-# --- 3. THE ANALYSIS ENGINE ---
-st.sidebar.header("Settings")
-ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL").upper()
-threshold = st.sidebar.slider("Alert Threshold (%)", -5.0, -0.5, -2.0)
+# --- 3. SIDEBAR & SEARCH ---
+st.sidebar.title("🔍 Global Search")
+search_query = st.sidebar.text_input("Enter Ticker (e.g. RELIANCE.NS, GOOG)", value="AAPL").upper()
+multi_select = st.sidebar.multiselect("Select Watchlist Charts", 
+                                    ["AAPL", "TSLA", "NVDA", "RELIANCE.NS", "TCS.NS", "BTC-USD", "ETH-USD", "MSFT", "AMZN", "GOOGL"],
+                                    default=["AAPL", "TSLA", "RELIANCE.NS"])
 
-@st.cache_data(ttl=30) # Reduced cache to keep it fresh
-def get_market_data(t):
-    # Changed to 5d to ensure we always have data even over weekends
-    return yf.download(t, period="5d", interval="1m")
+# --- 4. TOP WINNERS & LOSERS ---
+st.header("🏆 Live Market Leaderboard")
+movers_df = get_top_movers()
+col_gain, col_loss = st.columns(2)
 
-df = get_market_data(ticker)
+with col_gain:
+    st.success("Top Gainers")
+    st.table(movers_df.head(5))
 
-if df is not None and not df.empty:
-    # Handle the "Multi-index" issue some versions of yfinance have
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+with col_loss:
+    st.error("Top Losers")
+    st.table(movers_df.tail(5).iloc[::-1])
 
-    current_p = round(float(df['Close'].iloc[-1]), 2)
-    
-    # Calculate change over the last 60 rows (minutes)
-    price_start = df['Close'].iloc[-60] if len(df) >= 60 else df['Close'].iloc[0]
-    change_pct = ((current_p - price_start) / price_start) * 100
+st.write("---")
 
-    # --- UI DISPLAY ---
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        st.subheader(f"Live Intelligence: {ticker}")
-        fig = go.Figure(data=[go.Candlestick(
-            x=df.index,
-            open=df['Open'], high=df['High'],
-            low=df['Low'], close=df['Close'],
-            increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
-        )])
-        
-        fig.update_layout(
-            template="plotly_dark",
-            xaxis_rangeslider_visible=False,
-            height=500,
-            margin=dict(l=10, r=10, t=10, b=10),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
-        )
-        st.plotly_chart(fig, use_container_width=True)
+# --- 5. THE CHART GALLERY (Scrollable Grid) ---
+st.header("📊 Market Gallery (Live Previews)")
+gallery_tickers = list(set(multi_select + [search_query])) # Combine search and selection
 
-    with col2:
-        st.metric("Current Price", f"${current_p}", f"{round(change_pct, 2)}% (1h)")
-        st.write("---")
-        st.write("**Watchdog Status:** 🟢 Active")
-        st.write(f"**Last Sync:** {datetime.now().strftime('%H:%M:%S')}")
-        st.caption("Monitoring for drops exceeding your threshold.")
+# Create a grid of charts (2 per row)
+rows = (len(gallery_tickers) + 1) // 2
+for i in range(rows):
+    cols = st.columns(2)
+    for j in range(2):
+        idx = i * 2 + j
+        if idx < len(gallery_tickers):
+            t = gallery_tickers[idx]
+            with cols[j]:
+                with st.container():
+                    st.markdown(f"**{t}**")
+                    df = yf.download(t, period="5d", interval="1m", progress=False)
+                    if not df.empty:
+                        fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'])])
+                        fig.update_layout(template="plotly_dark", height=300, margin=dict(l=0,r=0,t=0,b=0), xaxis_rangeslider_visible=False)
+                        st.plotly_chart(fig, use_container_width=True, key=f"chart_{t}")
+                        
+                        # --- 6. SIMULATION LOGIC ---
+                        vol = df['Close'].pct_change().std()
+                        curr = df['Close'].iloc[-1]
+                        bull, base, bear = run_monte_carlo(curr, vol)
+                        st.caption(f"🎯 7-Day Forecast: Bull: ${round(bull,2)} | Base: ${round(base,2)} | Bear: ${round(bear,2)}")
+                    else:
+                        st.warning(f"No data for {t}")
 
-    # --- THE WATCHDOG (Unsupervised) ---
-    if change_pct <= threshold:
-        alert_text = f"{ticker} CRASH: Down {round(change_pct, 2)}% in 1h. Price: ${current_p}"
-        send_free_alert("🚨 MARKET ALARM", alert_text, priority="urgent")
-        st.error(f"🚨 CRITICAL DROP DETECTED. Alert sent to phone.")
-
-else:
-    st.warning(f"📈 No live data found for **{ticker}**. This usually means the market is currently closed or the ticker is mistyped.")
-    st.info("💡 Note: US Markets open at 9:30 AM EST. NSE Markets open at 9:15 AM IST.")
+st.write("---")
+st.info("💡 Tip: Use '.NS' for Indian stocks (NSE) and '.BO' for BSE. Example: RELIANCE.NS")
