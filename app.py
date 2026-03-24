@@ -1,159 +1,178 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from streamlit_autorefresh import st_autorefresh
+
 # ─────────────────────────────────────────────
-# 8. DETAIL VIEW (Updated for Uniform Candles & Correct Labels)
+# 1. PAGE CONFIG (Must be the very first Streamlit call)
 # ─────────────────────────────────────────────
-if st.session_state.selected_stock is not None:
-    ticker       = st.session_state.selected_stock
-    clean_sym    = ticker.replace(".NS","").replace("-USD","")
-    display_name = NAME_MAP.get(ticker, clean_sym)
+st.set_page_config(
+    page_title="Market Pulse | Terminal",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-    # Back + breadcrumb
-    col_back, col_bread = st.columns([1, 8])
-    with col_back:
-        if st.button("← Markets", key="back_btn"):
-            st.session_state.selected_stock = None
-            st.rerun()
-    with col_bread:
-        st.markdown(
-            f'<div class="breadcrumb" style="padding-top:9px">'
-            f'Markets &nbsp;/&nbsp; <span>{clean_sym}</span></div>',
-            unsafe_allow_html=True
-        )
+# ─────────────────────────────────────────────
+# 2. SESSION STATE INITIALIZATION (Prevents NameError)
+# ─────────────────────────────────────────────
+if "disclaimer_accepted" not in st.session_state:
+    st.session_state.disclaimer_accepted = False
+if "selected_stock" not in st.session_state:
+    st.session_state.selected_stock = None
+if "morning_predictions" not in st.session_state:
+    st.session_state.morning_predictions = {}
 
-    st.markdown(
-        f'<div class="detail-header">'
-        f'  <div class="detail-symbol">{clean_sym}</div>'
-        f'  <div style="font-family:var(--sans);font-size:.88rem;color:#4e5a6e">{display_name}</div>'
-    f'</div>',
-        unsafe_allow_html=True
-    )
+# Heartbeat refresh (30 seconds)
+st_autorefresh(interval=30_000, key="market_heartbeat")
 
-    # Timeframe tabs - Mapped to your specific course-of-time logic
-    tf_keys   = list(TIME_SETTINGS.keys())
-    tf_labels = [TIME_SETTINGS[k]["label"] for k in tf_keys]
-    tabs      = st.tabs(tf_labels)
+# ─────────────────────────────────────────────
+# 3. TICKER UNIVERSE & CONSTANTS
+# ─────────────────────────────────────────────
+SP500_TOP100 = [
+    ("AAPL","Apple"), ("MSFT","Microsoft"), ("NVDA","NVIDIA"), ("AMZN","Amazon"),
+    ("GOOGL","Alphabet"), ("META","Meta"), ("TSLA","Tesla"), ("LLY","Eli Lilly"),
+    ("AVGO","Broadcom"), ("JPM","JPMorgan"), ("UNH","UnitedHealth"), ("V","Visa")
+]
+NSE_TOP50 = [
+    ("RELIANCE.NS","Reliance"), ("TCS.NS","TCS"), ("HDFCBANK.NS","HDFC Bank"),
+    ("ICICIBANK.NS","ICICI Bank"), ("INFY.NS","Infosys"), ("SBI.NS","SBI")
+]
+CRYPTO = [("BTC-USD","Bitcoin"), ("ETH-USD","Ethereum"), ("SOL-USD","Solana")]
 
-    for i, tab in enumerate(tabs):
-        with tab:
-            cfg      = TIME_SETTINGS[tf_keys[i]]
-            df_chart = fetch_detail_data(ticker, cfg["period"], cfg["interval"])
-            df_ai    = fetch_detail_data(ticker, "1d", "1m")
+NAME_MAP = {t: n for t, n in SP500_TOP100 + NSE_TOP50 + CRYPTO}
 
-            if df_chart.empty:
-                st.warning(f"No data available for {ticker}.")
-                continue
+# Timeframe logic mapped to your "Course of time" requirements
+TIME_SETTINGS = {
+    "1m":  {"period": "1d",  "interval": "1m",  "label": "1 Min (Live)"},
+    "1h":  {"period": "7d",  "interval": "60m", "label": "Hourly"},
+    "1d":  {"period": "1y",  "interval": "1d",  "label": "Daily (1yr)"},
+    "1wk": {"period": "2y",  "interval": "1wk", "label": "Weekly"},
+    "1mo": {"period": "5y",  "interval": "1mo", "label": "Monthly"},
+    "3mo": {"period": "10y", "interval": "3mo", "label": "Quarterly"},
+}
 
-            # --- CANDLESTICK VISUAL FIXES ---
-            fig = go.Figure(data=[go.Candlestick(
-                x=df_chart.index,
-                open=df_chart["Open"],  high=df_chart["High"],
-                low=df_chart["Low"],    close=df_chart["Close"],
-                increasing_line_color="#3fb950", increasing_fillcolor="#1a3320",
-                decreasing_line_color="#f85149", decreasing_fillcolor="#3a1010",
-                line=dict(width=1.2), # Slightly thicker lines for clarity
-            )])
+CHART_FONT = dict(family="'IBM Plex Mono', monospace", size=11, color="#4e5a6e")
 
-            # FIX 1: Remove gaps & fix thickness using 'category' type for Intraday/Hourly
-            # This forces Plotly to treat every candle as an equal 'slot' regardless of time gaps
-            if tf_keys[i] in ("1m", "1h"):
-                fig.update_xaxes(
-                    type='category', 
-                    tickangle=0,
-                    nticks=10, # Keeps the bottom labels clean
-                    gridcolor="#1c2333"
-                )
-            else:
-                # For Daily/Monthly, we use standard date but hide weekends
-                fig.update_xaxes(
-                    rangebreaks=[dict(bounds=["sat", "mon"])],
-                    gridcolor="#1c2333"
-                )
+# ─────────────────────────────────────────────
+# 4. GLOBAL CSS & STYLING
+# ─────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
+:root { --bg: #07090f; --bg2: #0c1018; --border: #1c2333; --text: #dde3ed; --green: #3fb950; --red: #f85149; }
+html, body, .stApp { background: var(--bg) !important; color: var(--text); font-family: 'IBM Plex Sans', sans-serif; }
+.stock-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 15px; transition: 0.2s; }
+.stock-card:hover { border-color: #388bfd; transform: translateY(-2px); }
+.metric-strip { display: flex; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; margin: 20px 0; }
+.metric-cell { flex: 1; padding: 15px; border-right: 1px solid var(--border); text-align: center; }
+.insight-strip { background: #111722; border-left: 3px solid #388bfd; padding: 15px; color: #8493a8; font-size: 0.9rem; }
+.mp-header { border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
+</style>
+""", unsafe_allow_html=True)
 
-            fig.update_layout(
-                template="plotly_dark", height=500,
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#07090f",
-                margin=dict(l=0,r=0,t=10,b=0),
-                xaxis_rangeslider_visible=False,
-                font=CHART_FONT,
-                yaxis=dict(
-                    gridcolor="#1c2333", 
-                    linecolor="#1c2333",
-                    tickfont=CHART_FONT, 
-                    showgrid=True, 
-                    side="right",
-                    fixedrange=False # Allows vertical scaling
-                ),
-            )
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+# ─────────────────────────────────────────────
+# 5. FUNCTIONS
+# ─────────────────────────────────────────────
+def run_monte_carlo(current_price, vol, days=1):
+    sims = 1000
+    r = np.random.normal(0, vol, (sims, days))
+    paths = float(current_price) * np.exp(np.cumsum(r, axis=1))
+    return np.percentile(paths[:, -1], [95, 50, 5])
 
-            # --- INTRADAY METRICS & AI ---
-            if not df_ai.empty:
-                op   = float(df_ai["Open"].iloc[0])
-                curr = float(df_ai["Close"].iloc[-1])
-                ts   = df_ai.index[-1]
-                pct  = (curr - op) / op * 100
-                vol  = df_ai["Close"].pct_change().dropna().std()
-                up   = curr >= op
-                cc   = "up" if up else "down"
-                cs   = "+" if up else ""
+@st.cache_data(ttl=60)
+def fetch_data(ticker, period, interval):
+    try:
+        df = yf.download(ticker, period=period, interval=interval, progress=False)
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        return df
+    except: return pd.DataFrame()
 
-                st.markdown(f"""
-                <div class="metric-strip">
-                  <div class="metric-cell">
-                    <div class="metric-label">Open</div>
-                    <div class="metric-value">${op:,.2f}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-label">Last Price</div>
-                    <div class="metric-value">${curr:,.2f}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-label">Day Change</div>
-                    <div class="metric-value {cc}">{cs}{pct:.2f}%</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-label">Intraday Volatility</div>
-                    <div class="metric-value">{vol*100:.3f}%</div>
-                  </div>
-                </div>
-                """, unsafe_allow_html=True)
+# ─────────────────────────────────────────────
+# 6. RISK DISCLOSURE GATEWAY
+# ─────────────────────────────────────────────
+if not st.session_state.disclaimer_accepted:
+    st.markdown("""
+    <div style="background:#0c1018; border:1px solid #253045; padding:40px; max-width:600px; margin:100px auto; border-radius:8px; text-align:center;">
+        <h3 style="color:#dde3ed; font-family:'IBM Plex Mono';">Market Pulse · Risk Disclosure</h3>
+        <p style="color:#8493a8; font-size:0.9rem; line-height:1.6;">
+            Projections are statistical models and <b>do not guarantee performance</b>. 
+            Nothing here constitutes financial advice. Conduct your own due diligence.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("I Understand & Agree", use_container_width=True):
+        st.session_state.disclaimer_accepted = True
+        st.rerun()
+    st.stop()
 
-                if not np.isnan(vol) and vol > 0:
+# ─────────────────────────────────────────────
+# 7. MAIN INTERFACE
+# ─────────────────────────────────────────────
+st.markdown('<div class="mp-header"><span style="font-family:monospace; font-weight:600;">MARKET PULSE v2.0</span><span style="font-size:0.7rem; color:#4e5a6e;">LIVE TERMINAL</span></div>', unsafe_allow_html=True)
+
+# DETAIL VIEW LOGIC
+if st.session_state.selected_stock:
+    ticker = st.session_state.selected_stock
+    if st.button("← Back to Markets"):
+        st.session_state.selected_stock = None
+        st.rerun()
+
+    st.title(f"{ticker} Analysis")
+    tabs = st.tabs([TIME_SETTINGS[k]["label"] for k in TIME_SETTINGS])
+
+    for i, (key, cfg) in enumerate(TIME_SETTINGS.items()):
+        with tabs[i]:
+            df = fetch_data(ticker, cfg["period"], cfg["interval"])
+            if not df.empty:
+                fig = go.Figure(data=[go.Candlestick(
+                    x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+                    increasing_line_color='#3fb950', decreasing_line_color='#f85149'
+                )])
+                
+                # FIX: Uniform Candle Thickness
+                if key in ["1m", "1h"]:
+                    fig.update_xaxes(type='category', nticks=10)
+                else:
+                    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+                
+                fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0), font=CHART_FONT)
+                st.plotly_chart(fig, use_container_width=True)
+
+                # AI Metrics (Standardized for Intraday)
+                df_ai = fetch_data(ticker, "1d", "1m")
+                if not df_ai.empty:
+                    curr = df_ai['Close'].iloc[-1]
+                    vol = df_ai['Close'].pct_change().std()
                     bull, base, bear = run_monte_carlo(curr, vol)
-                    if ticker not in st.session_state.morning_predictions:
-                        st.session_state.morning_predictions[ticker] = base
-                    eod   = st.session_state.morning_predictions[ticker]
-                    trend = "advance toward" if eod > op else "decline toward"
-
+                    
                     st.markdown(f"""
+                    <div class="metric-strip">
+                        <div class="metric-cell"><small>LAST</small><br><b>${curr:,.2f}</b></div>
+                        <div class="metric-cell"><small>VOLATILITY</small><br><b>{vol*100:.3f}%</b></div>
+                        <div class="metric-cell"><small>PREDICTED</small><br><b>${base:,.2f}</b></div>
+                    </div>
                     <div class="insight-strip">
-                        Opened at <b>${op:,.2f}</b>. Volatility model projects the instrument 
-                        to <b>{trend} ${eod:,.2f}</b> by close.
-                        &nbsp;&nbsp;|&nbsp;&nbsp;
-                        Bull scenario: <b>${bull:,.2f}</b>
-                        &nbsp;&nbsp;·&nbsp;&nbsp;
-                        Bear scenario: <b>${bear:,.2f}</b>
+                        Monte Carlo Analysis: Bear <b>${bear:,.2f}</b> | Base <b>${base:,.2f}</b> | Bull <b>${bull:,.2f}</b>
                     </div>
                     """, unsafe_allow_html=True)
-
-                    is_eod = (
-                        (ticker.endswith(".NS") and ts.hour == 15 and ts.minute >= 25) or
-                        (not ticker.endswith(".NS") and ts.hour == 15 and ts.minute >= 55)
-                    )
-                    if is_eod:
-                        diff = curr - eod
-                        acc  = 100 - abs(diff) / eod * 100
-                        st.markdown(f"""
-                        <div class="eod-report">
-                        CLOSING REPORT — {clean_sym}<br>
-                        ─────────────────────────────<br>
-                        Predicted Close &nbsp;&nbsp;&nbsp; ${eod:,.2f}<br>
-                        Actual Close &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ${curr:,.2f}<br>
-                        Difference &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ${diff:+,.2f}<br>
-                        Model Accuracy &nbsp;&nbsp;&nbsp; {acc:.2f}%
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    st.caption("Awaiting sufficient intraday data.")
-
-    st.markdown('<div class="mp-footer">Market Pulse &nbsp;·&nbsp; Data via Yahoo Finance &nbsp;·&nbsp; For informational use only. Not financial advice.</div>', unsafe_allow_html=True)
+            else:
+                st.error("Data Stream Interrupted.")
     st.stop()
+
+# GRID VIEW LOGIC
+col_s, _ = st.columns([1, 2])
+search = col_s.text_input("Search Ticker", placeholder="e.g. AAPL, BTC-USD")
+if search:
+    st.session_state.selected_stock = search.upper()
+    st.rerun()
+
+# Display logic for Top 10 cards
+cols = st.columns(4)
+for i, (t, n) in enumerate(SP500_TOP100[:12]):
+    with cols[i % 4]:
+        st.markdown(f"<div class='stock-card'><b>{t}</b><br><small>{n}</small></div>", unsafe_allow_html=True)
+        if st.button(f"View {t}", key=t):
+            st.session_state.selected_stock = t
+            st.rerun()
