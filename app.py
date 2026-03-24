@@ -5,14 +5,12 @@ import numpy as np
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 from datetime import datetime
-import pytz
 
-# --- 1. SYSTEM CONFIG & 15-SECOND REFRESH ---
-# 15,000 milliseconds = 15 seconds
+# --- 1. SYSTEM CONFIG ---
 st_autorefresh(interval=15 * 1000, key="market_heartbeat")
 st.set_page_config(page_title="Market Pulse | Institutional Dashboard", layout="wide", initial_sidebar_state="collapsed")
 
-# --- 2. MEMORY BANK (For EOD Accuracy Tracking) ---
+# --- 2. MEMORY BANK ---
 if 'morning_predictions' not in st.session_state:
     st.session_state.morning_predictions = {}
 
@@ -29,7 +27,6 @@ st.markdown("""
 
 # --- 4. CORE ANALYTICS ENGINE ---
 def run_monte_carlo(current_price, vol, days=1):
-    """Calculates probability targets based on real volatility."""
     price_raw = float(current_price) 
     sims = 1000
     daily_returns = np.random.normal(0, vol, (sims, days))
@@ -40,45 +37,72 @@ indian_tickers = [f"{s}.NS" for s in ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK"
 us_tickers = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "BRK-B", "UNH", "JNJ"]
 all_100 = us_tickers + indian_tickers + ["BTC-USD", "ETH-USD"]
 
-# --- 5. SMART SEARCH ---
-st.markdown("<h1>📊 Market Pulse <span style='font-size: 1.2rem; color: #64748b;'>| High-Frequency Terminal</span></h1>", unsafe_allow_html=True)
+# --- 5. SMART SEARCH & TIMEFRAME CONTROLS ---
+st.markdown("<h1>📊 Market Pulse <span style='font-size: 1.2rem; color: #64748b;'>| Global Intelligence Terminal</span></h1>", unsafe_allow_html=True)
+
+col_search, col_time = st.columns([3, 1])
+with col_search:
+    selected_tickers = st.multiselect(
+        "🔍 Search & Compare Markets",
+        options=all_100,
+        default=["NVDA", "RELIANCE.NS"]
+    )
+with col_time:
+    # New Timeframe Selector
+    view_mode = st.selectbox(
+        "⏱️ Chart Timeframe",
+        ["Intraday (1-Minute)", "Hourly (1-Month View)", "Daily (1-Year View)", "Monthly (5-Year View)"]
+    )
+
 st.write("---")
 
-selected_tickers = st.multiselect(
-    "🔍 Search & Compare Markets (Type ticker to filter, select multiple to compare)",
-    options=all_100,
-    default=["NVDA", "RELIANCE.NS"]
-)
-
 if not selected_tickers:
-    st.info("👆 Please select at least one ticker from the search bar above to begin analysis.")
+    st.info("👆 Please select at least one ticker from the search bar to begin analysis.")
     st.stop()
+
+# Map the view selection to yfinance parameters
+time_settings = {
+    "Intraday (1-Minute)": {"period": "1d", "interval": "1m"},
+    "Hourly (1-Month View)": {"period": "1mo", "interval": "1h"},
+    "Daily (1-Year View)": {"period": "1y", "interval": "1d"},
+    "Monthly (5-Year View)": {"period": "5y", "interval": "1mo"}
+}
 
 # --- 6. DYNAMIC COMPARISON BOARD ---
 for t in selected_tickers:
     st.markdown(f"<div class='chart-box'>", unsafe_allow_html=True)
     st.subheader(f"Ticker: {t}")
     
-    # FETCH 1-DAY, 1-MINUTE DATA (Hyper-dense, real-time candles)
-    df = yf.download(t, period="1d", interval="1m", progress=False)
+    # 1. FETCH CHART DATA (Based on user selection)
+    c_period = time_settings[view_mode]["period"]
+    c_interval = time_settings[view_mode]["interval"]
+    df_chart = yf.download(t, period=c_period, interval=c_interval, progress=False)
     
-    if not df.empty:
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    # 2. FETCH AI/INSIGHT DATA (Always 1-Day / 1-Minute for accurate EOD tracking)
+    df_ai = yf.download(t, period="1d", interval="1m", progress=False)
+    
+    if not df_chart.empty and not df_ai.empty:
+        if isinstance(df_chart.columns, pd.MultiIndex): df_chart.columns = df_chart.columns.get_level_values(0)
+        if isinstance(df_ai.columns, pd.MultiIndex): df_ai.columns = df_ai.columns.get_level_values(0)
         
-        open_price = float(df['Open'].iloc[0].item())
-        curr_price = float(df['Close'].iloc[-1].item())
-        last_timestamp = df.index[-1]
-        
-        # 1. CHART RENDERING
-        fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        # --- CHART RENDERING ---
+        fig = go.Figure(data=[go.Candlestick(x=df_chart.index, open=df_chart['Open'], high=df_chart['High'], low=df_chart['Low'], close=df_chart['Close'],
                                            increasing_line_color='#10b981', decreasing_line_color='#ef4444')])
         
+        # Only hide non-trading hours on Intraday and Hourly. Daily/Monthly handles it automatically.
+        if view_mode in ["Intraday (1-Minute)", "Hourly (1-Month View)"]:
+            fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"]), dict(bounds=[16, 9.5], pattern="hour")])
+            
         fig.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                           margin=dict(l=10, r=10, t=10, b=10), xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
         
-        # 2. INTRADAY PREDICTION ENGINE
-        returns = df['Close'].pct_change().dropna()
+        # --- AI INTRADAY PREDICTION ENGINE ---
+        open_price = float(df_ai['Open'].iloc[0].item())
+        curr_price = float(df_ai['Close'].iloc[-1].item())
+        last_timestamp = df_ai.index[-1]
+        
+        returns = df_ai['Close'].pct_change().dropna()
         vol = returns.std()
         
         if not np.isnan(vol) and vol > 0:
@@ -96,12 +120,11 @@ for t in selected_tickers:
             c2.metric("Live Price", f"${curr_price:,.2f}", f"{((curr_price-open_price)/open_price)*100:.2f}%")
             c3.metric("Predicted EOD Close", f"${expected_close:,.2f}")
             
-            # The Custom Insight Sentence
+            # The Custom Insight Sentence (Fixed the formatting bug by escaping the $ sign with \)
             trend_word = "climb" if expected_close > open_price else "drop"
-            st.info(f"**Live Insight:** Opening at **${open_price:,.2f}**, and based on real-time volatility calculations, it is predicted to {trend_word} and end at **${expected_close:,.2f}**.")
+            st.info(f"**Live Insight:** Opening at **\${open_price:,.2f}**, and based on real-time volatility calculations, it is predicted to {trend_word} and end at **\${expected_close:,.2f}**.")
             
-            # --- 7. EOD ACCURACY POPUP ---
-            # Check if it's near market close (US: 15:55+, India: 15:25+)
+            # --- EOD ACCURACY POPUP ---
             is_eod = False
             if t.endswith(".NS") and last_timestamp.hour == 15 and last_timestamp.minute >= 25:
                 is_eod = True
@@ -115,18 +138,17 @@ for t in selected_tickers:
                 st.warning("🔔 **MARKET CLOSING REPORT**")
                 st.markdown(f"""
                 > **{t} End of Day Summary:**
-                > * Predicted Close: **${expected_close:,.2f}**
-                > * Actual Close: **${curr_price:,.2f}**
-                > * Difference: **${diff:,.2f}**
+                > * Predicted Close: **\${expected_close:,.2f}**
+                > * Actual Close: **\${curr_price:,.2f}**
+                > * Difference: **\${diff:,.2f}**
                 > * **Model Accuracy:** **{accuracy:.2f}%**
                 """)
-                st.toast(f"{t} Market Closed. Accuracy: {accuracy:.2f}%", icon="📈")
                 
         else:
             st.caption("Awaiting sufficient volatility data...")
             
     else:
-        st.warning(f"Market data stream for {t} is currently unavailable. Market may be closed.")
+        st.warning(f"Market data stream for {t} is currently unavailable.")
         
     st.markdown("</div>", unsafe_allow_html=True)
     st.write("---")
