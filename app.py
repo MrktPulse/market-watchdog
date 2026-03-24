@@ -74,7 +74,7 @@ for i in range(0, len(all_tickers), 2):
             t = all_tickers[i + j]
             with cols[j]:
                 st.subheader(f"📈 {t}")
-                # 15m interval fixed the "Ghost Gaps" in 5-day charts
+                # Use 1h interval for 1mo lookback or 15m for 5d to ensure thick candles
                 df = yf.download(t, period="5d", interval="15m", progress=False)
                 
                 if not df.empty:
@@ -87,11 +87,26 @@ for i in range(0, len(all_tickers), 2):
                         low=df['Low'], close=df['Close'],
                         increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
                     )])
-                    fig.update_layout(template="plotly_dark", height=380, margin=dict(l=0,r=0,t=0,b=0), xaxis_rangeslider_visible=False)
+                    
+                    # THE GAP FIX: This removes weekends and non-trading hours
+                    fig.update_xaxes(
+                        rangebreaks=[
+                            dict(bounds=["sat", "mon"]), # hide weekends
+                            dict(bounds=[16, 9.5], pattern="hour"), # hide off-hours for US (approx)
+                        ]
+                    )
+
+                    fig.update_layout(
+                        template="plotly_dark", 
+                        height=400, 
+                        margin=dict(l=0,r=0,t=0,b=0), 
+                        xaxis_rangeslider_visible=False,
+                        hovermode="x unified"
+                    )
                     st.plotly_chart(fig, use_container_width=True, key=f"chart_{t}_{i}_{j}")
                     
                     # Simulation
-                    curr_price = float(df['Close'].iloc[-1])
+                    curr_price = float(df['Close'].iloc[-1].item())
                     vol = df['Close'].pct_change().std()
                     
                     if not np.isnan(vol) and vol > 0:
