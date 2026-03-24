@@ -48,10 +48,17 @@ with col_search:
         default=["NVDA", "RELIANCE.NS"]
     )
 with col_time:
-    # New Timeframe Selector
+    # CLEANED TIMEFRAME SELECTOR
     view_mode = st.selectbox(
         "⏱️ Chart Timeframe",
-        ["Intraday (1-Minute)", "Hourly (1-Month View)", "Daily (1-Year View)", "Monthly (5-Year View)"]
+        [
+            "1-Minute View (Intraday)", 
+            "Hourly View", 
+            "Daily View", 
+            "Monthly View", 
+            "Quarterly View", 
+            "Yearly View"
+        ]
     )
 
 st.write("---")
@@ -60,12 +67,15 @@ if not selected_tickers:
     st.info("👆 Please select at least one ticker from the search bar to begin analysis.")
     st.stop()
 
-# Map the view selection to yfinance parameters
+# CORRECTED TIME MAPPINGS
+# Period = How much history to load | Interval = What each candle represents
 time_settings = {
-    "Intraday (1-Minute)": {"period": "1d", "interval": "1m"},
-    "Hourly (1-Month View)": {"period": "1mo", "interval": "1h"},
-    "Daily (1-Year View)": {"period": "1y", "interval": "1d"},
-    "Monthly (5-Year View)": {"period": "5y", "interval": "1mo"}
+    "1-Minute View (Intraday)": {"period": "1d", "interval": "1m"},
+    "Hourly View": {"period": "1mo", "interval": "1h"},
+    "Daily View": {"period": "1y", "interval": "1d"},
+    "Monthly View": {"period": "10y", "interval": "1mo"},
+    "Quarterly View": {"period": "10y", "interval": "3mo"},
+    "Yearly View": {"period": "max", "interval": "1y"}
 }
 
 # --- 6. DYNAMIC COMPARISON BOARD ---
@@ -73,12 +83,12 @@ for t in selected_tickers:
     st.markdown(f"<div class='chart-box'>", unsafe_allow_html=True)
     st.subheader(f"Ticker: {t}")
     
-    # 1. FETCH CHART DATA (Based on user selection)
+    # 1. FETCH CHART DATA
     c_period = time_settings[view_mode]["period"]
     c_interval = time_settings[view_mode]["interval"]
     df_chart = yf.download(t, period=c_period, interval=c_interval, progress=False)
     
-    # 2. FETCH AI/INSIGHT DATA (Always 1-Day / 1-Minute for accurate EOD tracking)
+    # 2. FETCH AI/INSIGHT DATA (Always 1-Day / 1-Minute for EOD tracking)
     df_ai = yf.download(t, period="1d", interval="1m", progress=False)
     
     if not df_chart.empty and not df_ai.empty:
@@ -86,15 +96,32 @@ for t in selected_tickers:
         if isinstance(df_ai.columns, pd.MultiIndex): df_ai.columns = df_ai.columns.get_level_values(0)
         
         # --- CHART RENDERING ---
-        fig = go.Figure(data=[go.Candlestick(x=df_chart.index, open=df_chart['Open'], high=df_chart['High'], low=df_chart['Low'], close=df_chart['Close'],
-                                           increasing_line_color='#10b981', decreasing_line_color='#ef4444')])
+        fig = go.Figure(data=[go.Candlestick(
+            x=df_chart.index, 
+            open=df_chart['Open'], high=df_chart['High'], 
+            low=df_chart['Low'], close=df_chart['Close'],
+            increasing_line_color='#10b981', decreasing_line_color='#ef4444'
+        )])
         
-        # Only hide non-trading hours on Intraday and Hourly. Daily/Monthly handles it automatically.
-        if view_mode in ["Intraday (1-Minute)", "Hourly (1-Month View)"]:
-            fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"]), dict(bounds=[16, 9.5], pattern="hour")])
-            
-        fig.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                          margin=dict(l=10, r=10, t=10, b=10), xaxis_rangeslider_visible=False)
+        # VISUAL FIX: Removing gaps cleanly depending on the timeframe to keep candles uniform
+        if view_mode in ["1-Minute View (Intraday)", "Hourly View"]:
+            fig.update_xaxes(
+                rangebreaks=[
+                    dict(bounds=["sat", "mon"]), # Hide weekends
+                    dict(bounds=[16, 9.5], pattern="hour") # Hide after-hours
+                ]
+            )
+        
+        # Lock the layout to prevent Plotly from drawing mismatched fonts or squished candles
+        fig.update_layout(
+            template="plotly_dark", 
+            height=450, 
+            paper_bgcolor='rgba(0,0,0,0)', 
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=10, r=10, t=10, b=10), 
+            xaxis_rangeslider_visible=False,
+            font=dict(family="Inter, sans-serif", size=12) # Forces identical fonts on all charts
+        )
         st.plotly_chart(fig, use_container_width=True)
         
         # --- AI INTRADAY PREDICTION ENGINE ---
@@ -108,7 +135,6 @@ for t in selected_tickers:
         if not np.isnan(vol) and vol > 0:
             bull, base, bear = run_monte_carlo(curr_price, vol, days=1)
             
-            # Save the first prediction of the day in Memory
             if t not in st.session_state.morning_predictions:
                 st.session_state.morning_predictions[t] = base
             
@@ -120,7 +146,6 @@ for t in selected_tickers:
             c2.metric("Live Price", f"${curr_price:,.2f}", f"{((curr_price-open_price)/open_price)*100:.2f}%")
             c3.metric("Predicted EOD Close", f"${expected_close:,.2f}")
             
-            # The Custom Insight Sentence (Fixed the formatting bug by escaping the $ sign with \)
             trend_word = "climb" if expected_close > open_price else "drop"
             st.info(f"**Live Insight:** Opening at **\${open_price:,.2f}**, and based on real-time volatility calculations, it is predicted to {trend_word} and end at **\${expected_close:,.2f}**.")
             
