@@ -7,7 +7,7 @@ import requests
 from streamlit_autorefresh import st_autorefresh
 from datetime import datetime
 
-# --- 1. CONFIG & REFRESH ---
+# --- 1. SETTINGS & REFRESH ---
 NTFY_TOPIC = "MrktPulse_Live_Sator__FFP_QTR"
 st_autorefresh(interval=60 * 1000, key="market_heartbeat")
 
@@ -17,83 +17,103 @@ st.set_page_config(page_title="MarketPulse AI: Command Center", layout="wide")
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
-    div[data-testid="stMetricValue"] { font-size: 1.8rem; color: #00ffcc; }
-    .chart-container { border: 1px solid #30363d; border-radius: 10px; padding: 10px; margin-bottom: 20px; }
+    div[data-testid="stMetricValue"] { font-size: 1.6rem; color: #00ffcc; }
+    .stTable { background-color: #161b22; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA FUNCTIONS ---
+# --- 2. CORE FUNCTIONS ---
+
 @st.cache_data(ttl=300)
 def get_top_movers():
-    # Pre-defined list of major global/Indian tickers to track for the leaderboard
-    watch_list = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "AAPL", "TSLA", "NVDA", "MSFT", "HDFCBANK.NS", "ICICIBANK.NS", "AMZN"]
-    data = yf.download(watch_list, period="1d", group_by='ticker')
-    movers = []
-    for t in watch_list:
-        try:
-            hist = data[t]
-            change = ((hist['Close'].iloc[-1] - hist['Open'].iloc[0]) / hist['Open'].iloc[0]) * 100
-            movers.append({"Ticker": t, "Price": round(hist['Close'].iloc[-1], 2), "Change": round(change, 2)})
-        except: continue
-    df_movers = pd.DataFrame(movers).sort_values(by="Change", ascending=False)
-    return df_movers
+    """Fetches a quick snapshot of global leaders for the leaderboard."""
+    watch_list = ["AAPL", "TSLA", "NVDA", "RELIANCE.NS", "TCS.NS", "INFY.NS", "BTC-USD"]
+    try:
+        data = yf.download(watch_list, period="1d", interval="1m", progress=False)
+        # Handle new yfinance MultiIndex columns
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+            
+        movers = []
+        for t in watch_list:
+            ticker_data = yf.Ticker(t).history(period="1d")
+            if not ticker_data.empty:
+                open_p = ticker_data['Open'].iloc[0]
+                close_p = ticker_data['Close'].iloc[-1]
+                change = ((close_p - open_p) / open_p) * 100
+                movers.append({"Ticker": t, "Price": round(close_p, 2), "Change %": round(change, 2)})
+        return pd.DataFrame(movers).sort_values(by="Change %", ascending=False)
+    except:
+        return pd.DataFrame(columns=["Ticker", "Price", "Change %"])
 
 def run_monte_carlo(current_price, vol, days=7):
-    # 1000 random walks for the simulation part
+    """Fixed Monte Carlo: Ensures math works with raw numbers, not tables."""
+    price_raw = float(current_price) 
     sims = 1000
-    results = current_price * np.exp(np.cumsum(np.random.normal(0, vol, (sims, days)), axis=1))
-    return np.percentile(results[:, -1], [95, 50, 5]) # Bull, Base, Bear
+    daily_returns = np.random.normal(0, vol, (sims, days))
+    price_paths = price_raw * np.exp(np.cumsum(daily_returns, axis=1))
+    return np.percentile(price_paths[:, -1], [95, 50, 5])
 
 # --- 3. SIDEBAR & SEARCH ---
-st.sidebar.title("🔍 Global Search")
-search_query = st.sidebar.text_input("Enter Ticker (e.g. RELIANCE.NS, GOOG)", value="AAPL").upper()
-multi_select = st.sidebar.multiselect("Select Watchlist Charts", 
-                                    ["AAPL", "TSLA", "NVDA", "RELIANCE.NS", "TCS.NS", "BTC-USD", "ETH-USD", "MSFT", "AMZN", "GOOGL"],
-                                    default=["AAPL", "TSLA", "RELIANCE.NS"])
+st.sidebar.title("🔍 Global Command")
+search_query = st.sidebar.text_input("Search Ticker (e.g. RELIANCE.NS, TSLA)", value="TSLA").upper()
+watchlist = st.sidebar.multiselect("Active Watchlist", 
+                                   ["AAPL", "NVDA", "TSLA", "RELIANCE.NS", "TCS.NS", "BTC-USD", "ETH-USD"],
+                                   default=["AAPL", "TSLA", "RELIANCE.NS"])
 
 # --- 4. TOP WINNERS & LOSERS ---
 st.header("🏆 Live Market Leaderboard")
 movers_df = get_top_movers()
-col_gain, col_loss = st.columns(2)
-
-with col_gain:
-    st.success("Top Gainers")
-    st.table(movers_df.head(5))
-
-with col_loss:
-    st.error("Top Losers")
-    st.table(movers_df.tail(5).iloc[::-1])
+if not movers_df.empty:
+    col_gain, col_loss = st.columns(2)
+    with col_gain:
+        st.success("Top Gainers")
+        st.dataframe(movers_df.head(3), hide_index=True, use_container_width=True)
+    with col_loss:
+        st.error("Top Losers")
+        st.dataframe(movers_df.tail(3).sort_values(by="Change %"), hide_index=True, use_container_width=True)
 
 st.write("---")
 
-# --- 5. THE CHART GALLERY (Scrollable Grid) ---
-st.header("📊 Market Gallery (Live Previews)")
-gallery_tickers = list(set(multi_select + [search_query])) # Combine search and selection
+# --- 5. CHART GALLERY GRID ---
+st.header("📊 Market Gallery")
+all_tickers = list(dict.fromkeys([search_query] + watchlist)) # Unique list
 
-# Create a grid of charts (2 per row)
-rows = (len(gallery_tickers) + 1) // 2
-for i in range(rows):
+# Build the grid (2 columns wide)
+for i in range(0, len(all_tickers), 2):
     cols = st.columns(2)
     for j in range(2):
-        idx = i * 2 + j
-        if idx < len(gallery_tickers):
-            t = gallery_tickers[idx]
+        if i + j < len(all_tickers):
+            t = all_tickers[i + j]
             with cols[j]:
-                with st.container():
-                    st.markdown(f"**{t}**")
-                    df = yf.download(t, period="5d", interval="1m", progress=False)
-                    if not df.empty:
-                        fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'])])
-                        fig.update_layout(template="plotly_dark", height=300, margin=dict(l=0,r=0,t=0,b=0), xaxis_rangeslider_visible=False)
-                        st.plotly_chart(fig, use_container_width=True, key=f"chart_{t}")
-                        
-                        # --- 6. SIMULATION LOGIC ---
-                        vol = df['Close'].pct_change().std()
-                        curr = df['Close'].iloc[-1]
-                        bull, base, bear = run_monte_carlo(curr, vol)
-                        st.caption(f"🎯 7-Day Forecast: Bull: ${round(bull,2)} | Base: ${round(base,2)} | Bear: ${round(bear,2)}")
+                st.subheader(f"📈 {t}")
+                df = yf.download(t, period="5d", interval="1m", progress=False)
+                
+                if not df.empty:
+                    # Fix for MultiIndex Columns
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = df.columns.get_level_values(0)
+                    
+                    # Charting
+                    fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'])])
+                    fig.update_layout(template="plotly_dark", height=350, margin=dict(l=0,r=0,t=0,b=0), xaxis_rangeslider_visible=False)
+                    st.plotly_chart(fig, use_container_width=True, key=f"chart_{t}_{i}_{j}")
+                    
+                    # Simulation Math
+                    curr_price = float(df['Close'].iloc[-1])
+                    returns = df['Close'].pct_change().dropna()
+                    vol = returns.std()
+                    
+                    if not np.isnan(vol) and vol > 0:
+                        bull, base, bear = run_monte_carlo(curr_price, vol)
+                        st.write(f"**7-Day Prediction:** 🐂 Bull: ${round(bull,2)} | 🏠 Base: ${round(base,2)} | 🐻 Bear: ${round(bear,2)}")
                     else:
-                        st.warning(f"No data for {t}")
+                        st.caption("Insufficient volatility data for simulation.")
+                else:
+                    st.warning(f"No data for {t}. Is the market open?")
 
-st.write("---")
-st.info("💡 Tip: Use '.NS' for Indian stocks (NSE) and '.BO' for BSE. Example: RELIANCE.NS")
+# --- 6. AUTO-ALERT LOGIC ---
+# (Alerts you via ntfy if the searched ticker drops > 2%)
+if not df.empty and 'change_pct' in locals():
+    if change_pct <= -2.0:
+        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=f"CRITICAL: {search_query} dropped {round(change_pct,2)}%!")
