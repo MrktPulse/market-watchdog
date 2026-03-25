@@ -43,7 +43,7 @@ html, body, .stApp { background: var(--bg) !important; color: var(--text); font-
 .stock-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 15px; margin-bottom:10px; height: 100px; cursor: pointer; }
 .metric-strip { display: flex; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; margin: 20px 0; }
 .metric-cell { flex: 1; padding: 15px; border-right: 1px solid var(--border); text-align: center; }
-.accuracy-report { background: #0a1a0a; border: 1px solid #1a3320; border-radius: 4px; padding: 15px; color: #5a9a5a; font-family: 'IBM Plex Mono'; }
+.accuracy-report { background: #0a1a0a; border: 1px solid #1a3320; border-radius: 4px; padding: 20px; color: #5a9a5a; font-family: 'IBM Plex Mono'; line-height: 1.6; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -54,13 +54,13 @@ if not st.session_state.disclaimer_accepted:
         st.write("#")
         with st.container(border=True):
             st.subheader("⚠️ Risk Disclosure")
-            st.write("Predictions are generated via stochastic Monte Carlo simulations. Accuracy varies by market volatility.")
+            st.write("Predictions are stochastic models. Past accuracy does not guarantee future results.")
             if st.button("I Understand & Agree", use_container_width=True, type="primary"):
                 st.session_state.disclaimer_accepted = True
                 st.rerun()
     st.stop()
 
-st.markdown('<div class="mp-header"><span style="font-family:monospace; font-weight:600;">MARKET PULSE v2.9</span><span style="font-size:0.7rem; color:#4e5a6e;">LIVE TERMINAL</span></div>', unsafe_allow_html=True)
+st.markdown('<div class="mp-header"><span style="font-family:monospace; font-weight:600;">MARKET PULSE v3.0</span><span style="font-size:0.7rem; color:#4e5a6e;">LIVE TERMINAL</span></div>', unsafe_allow_html=True)
 
 # 6. FUNCTIONS
 def fetch_data(ticker, period, interval):
@@ -71,10 +71,8 @@ def fetch_data(ticker, period, interval):
     except: return pd.DataFrame()
 
 def generate_jagged_path(start_price, end_price, num_steps, vol):
-    """Creates a highly volatile path that matches a realistic trading day's noise."""
     t = np.linspace(0, 1, num_steps)
-    # Amplify the noise (vol * 5) to ensure it's visible on high-priced stocks
-    noise = np.cumsum(np.random.normal(0, vol * 5, num_steps))
+    noise = np.cumsum(np.random.normal(0, vol * 60, num_steps))
     bridge = noise - t * noise[-1]
     trend = np.linspace(start_price, end_price, num_steps)
     return trend + bridge
@@ -103,7 +101,6 @@ if st.session_state.selected_stock:
                     if ticker not in st.session_state.morning_predictions:
                         r = np.random.normal(0, vol if vol > 0 else 0.002, 1)
                         target = float(df_day['Open'].iloc[0]) * np.exp(r[0])
-                        # Generate the path with higher resolution noise
                         path = generate_jagged_path(df_day['Open'].iloc[0], target, len(df_day), vol * 50)
                         st.session_state.morning_predictions[ticker] = {"target": target, "path": path}
                     
@@ -111,13 +108,21 @@ if st.session_state.selected_stock:
 
                 if show_acc and not df_day.empty:
                     acc = 100 - (abs(curr - morning_data['target']) / morning_data['target'] * 100)
-                    st.markdown(f"<div class='accuracy-report'><b>ACCURACY: {acc:.2f}%</b></div>", unsafe_allow_html=True)
+                    # FULL DATA RESTORED TO REPORT BOX
+                    st.markdown(f"""
+                    <div class='accuracy-report'>
+                        <b>ACCURACY: {acc:.2f}%</b><br>
+                        ──────────────────────────<br>
+                        Predicted Close: ${morning_data['target']:,.2f}<br>
+                        Actual Price: &nbsp;&nbsp;&nbsp;${curr:,.2f}<br>
+                        Day Volatility: &nbsp;{vol*100:.3f}%
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(x=df_day.index, y=df_day['Close'], name="Actual Price", line=dict(color='#3fb950')))
-                    fig.add_trace(go.Scatter(x=df_day.index, y=morning_data['path'][:len(df_day)], 
-                                             name="AI Predicted Path", line=dict(color='#388bfd', dash='dot', width=1.5)))
-                    fig.update_layout(template="plotly_dark", height=450, showlegend=True)
+                    fig.add_trace(go.Scatter(x=df_day.index, y=morning_data['path'][:len(df_day)], name="AI Predicted Path", line=dict(color='#388bfd', dash='dot')))
+                    fig.update_layout(template="plotly_dark", height=450)
                 else:
                     fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'])])
                     fig.update_layout(template="plotly_dark", height=450, xaxis_rangeslider_visible=False)
