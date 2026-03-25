@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 
 # ─────────────────────────────────────────────
-# 1. PAGE CONFIG (Must be the very first Streamlit call)
+# 1. PAGE CONFIG
 # ─────────────────────────────────────────────
 st.set_page_config(
     page_title="Market Pulse | Terminal",
@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────
-# 2. SESSION STATE INITIALIZATION (Prevents NameError)
+# 2. SESSION STATE INITIALIZATION
 # ─────────────────────────────────────────────
 if "disclaimer_accepted" not in st.session_state:
     st.session_state.disclaimer_accepted = False
@@ -24,7 +24,6 @@ if "selected_stock" not in st.session_state:
 if "morning_predictions" not in st.session_state:
     st.session_state.morning_predictions = {}
 
-# Heartbeat refresh (30 seconds)
 st_autorefresh(interval=30_000, key="market_heartbeat")
 
 # ─────────────────────────────────────────────
@@ -43,7 +42,6 @@ CRYPTO = [("BTC-USD","Bitcoin"), ("ETH-USD","Ethereum"), ("SOL-USD","Solana")]
 
 NAME_MAP = {t: n for t, n in SP500_TOP100 + NSE_TOP50 + CRYPTO}
 
-# Timeframe logic mapped to your "Course of time" requirements
 TIME_SETTINGS = {
     "1m":  {"period": "1d",  "interval": "1m",  "label": "1 Min (Live)"},
     "1h":  {"period": "7d",  "interval": "60m", "label": "Hourly"},
@@ -67,8 +65,13 @@ html, body, .stApp { background: var(--bg) !important; color: var(--text); font-
 .stock-card:hover { border-color: #388bfd; transform: translateY(-2px); }
 .metric-strip { display: flex; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; margin: 20px 0; }
 .metric-cell { flex: 1; padding: 15px; border-right: 1px solid var(--border); text-align: center; }
-.insight-strip { background: #111722; border-left: 3px solid #388bfd; padding: 15px; color: #8493a8; font-size: 0.9rem; }
+.insight-strip { background: #111722; border-left: 3px solid #388bfd; padding: 15px; color: #8493a8; font-size: 0.9rem; margin-bottom: 10px; }
 .mp-header { border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
+.eod-report {
+    background: #0a1a0a; border: 1px solid #1a3320; border-radius: 4px;
+    padding: 16px 20px; font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem;
+    color: #5a9a5a; line-height: 1.8; margin-top: 15px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -90,7 +93,7 @@ def fetch_data(ticker, period, interval):
     except: return pd.DataFrame()
 
 # ─────────────────────────────────────────────
-# 6. RISK DISCLOSURE GATEWAY
+# 6. RISK DISCLOSURE
 # ─────────────────────────────────────────────
 if not st.session_state.disclaimer_accepted:
     st.markdown("""
@@ -110,9 +113,13 @@ if not st.session_state.disclaimer_accepted:
 # ─────────────────────────────────────────────
 # 7. MAIN INTERFACE
 # ─────────────────────────────────────────────
+# Sidebar for testing the EOD report display
+with st.sidebar:
+    st.write("### Developer Tools")
+    test_mode = st.toggle("Force Show EOD Report", value=False)
+
 st.markdown('<div class="mp-header"><span style="font-family:monospace; font-weight:600;">MARKET PULSE v2.0</span><span style="font-size:0.7rem; color:#4e5a6e;">LIVE TERMINAL</span></div>', unsafe_allow_html=True)
 
-# DETAIL VIEW LOGIC
 if st.session_state.selected_stock:
     ticker = st.session_state.selected_stock
     if st.button("← Back to Markets"):
@@ -131,7 +138,6 @@ if st.session_state.selected_stock:
                     increasing_line_color='#3fb950', decreasing_line_color='#f85149'
                 )])
                 
-                # FIX: Uniform Candle Thickness
                 if key in ["1m", "1h"]:
                     fig.update_xaxes(type='category', nticks=10)
                 else:
@@ -140,23 +146,55 @@ if st.session_state.selected_stock:
                 fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0), font=CHART_FONT)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # AI Metrics (Standardized for Intraday)
+                # AI Metrics & EOD Logic
                 df_ai = fetch_data(ticker, "1d", "1m")
                 if not df_ai.empty:
-                    curr = df_ai['Close'].iloc[-1]
-                    vol = df_ai['Close'].pct_change().std()
-                    bull, base, bear = run_monte_carlo(curr, vol)
+                    op = float(df_ai['Open'].iloc[0])
+                    curr = float(df_ai['Close'].iloc[-1])
+                    ts = df_ai.index[-1]
+                    vol = df_ai['Close'].pct_change().dropna().std()
                     
-                    st.markdown(f"""
-                    <div class="metric-strip">
-                        <div class="metric-cell"><small>LAST</small><br><b>${curr:,.2f}</b></div>
-                        <div class="metric-cell"><small>VOLATILITY</small><br><b>{vol*100:.3f}%</b></div>
-                        <div class="metric-cell"><small>PREDICTED</small><br><b>${base:,.2f}</b></div>
-                    </div>
-                    <div class="insight-strip">
-                        Monte Carlo Analysis: Bear <b>${bear:,.2f}</b> | Base <b>${base:,.2f}</b> | Bull <b>${bull:,.2f}</b>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    if not np.isnan(vol) and vol > 0:
+                        bull, base, bear = run_monte_carlo(curr, vol)
+                        
+                        # Store prediction so it doesn't change every refresh
+                        if ticker not in st.session_state.morning_predictions:
+                            st.session_state.morning_predictions[ticker] = base
+                        
+                        eod_pred = st.session_state.morning_predictions[ticker]
+
+                        st.markdown(f"""
+                        <div class="metric-strip">
+                            <div class="metric-cell"><small>LAST</small><br><b>${curr:,.2f}</b></div>
+                            <div class="metric-cell"><small>VOLATILITY</small><br><b>{vol*100:.3f}%</b></div>
+                            <div class="metric-cell"><small>PREDICTED CLOSE</small><br><b>${eod_pred:,.2f}</b></div>
+                        </div>
+                        <div class="insight-strip">
+                            Monte Carlo Analysis: Bear <b>${bear:,.2f}</b> | Base <b>${base:,.2f}</b> | Bull <b>${bull:,.2f}</b>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        # EOD Report Logic (Triggered at market close or Test Mode)
+                        is_eod_time = (
+                            (ticker.endswith(".NS") and ts.hour == 15 and ts.minute >= 25) or
+                            (not ticker.endswith(".NS") and ts.hour == 15 and ts.minute >= 55)
+                        )
+
+                        if is_eod_time or test_mode:
+                            diff = curr - eod_pred
+                            acc = 100 - abs(diff) / eod_pred * 100
+                            st.markdown(f"""
+                            <div class="eod-report">
+                                <b>CLOSING PERFORMANCE REPORT — {ticker}</b><br>
+                                ──────────────────────────────────────────<br>
+                                Monte Carlo Prediction: &nbsp;&nbsp; ${eod_pred:,.2f}<br>
+                                Actual Market Close: &nbsp;&nbsp;&nbsp; ${curr:,.2f}<br>
+                                Variance: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ${diff:+,.2f}<br>
+                                <b>Model Accuracy: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {acc:.2f}%</b>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    else:
+                        st.caption("Awaiting sufficient intraday data for Monte Carlo.")
             else:
                 st.error("Data Stream Interrupted.")
     st.stop()
@@ -168,7 +206,6 @@ if search:
     st.session_state.selected_stock = search.upper()
     st.rerun()
 
-# Display logic for Top 10 cards
 cols = st.columns(4)
 for i, (t, n) in enumerate(SP500_TOP100[:12]):
     with cols[i % 4]:
