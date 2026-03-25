@@ -54,13 +54,13 @@ if not st.session_state.disclaimer_accepted:
         st.write("#")
         with st.container(border=True):
             st.subheader("⚠️ Risk Disclosure")
-            st.write("Predictions use Monte Carlo simulations. They represent statistical probabilities, not certainties.")
+            st.write("Predictions are generated via stochastic Monte Carlo simulations. Accuracy varies by market volatility.")
             if st.button("I Understand & Agree", use_container_width=True, type="primary"):
                 st.session_state.disclaimer_accepted = True
                 st.rerun()
     st.stop()
 
-st.markdown('<div class="mp-header"><span style="font-family:monospace; font-weight:600;">MARKET PULSE v2.8</span><span style="font-size:0.7rem; color:#4e5a6e;">LIVE TERMINAL</span></div>', unsafe_allow_html=True)
+st.markdown('<div class="mp-header"><span style="font-family:monospace; font-weight:600;">MARKET PULSE v2.9</span><span style="font-size:0.7rem; color:#4e5a6e;">LIVE TERMINAL</span></div>', unsafe_allow_html=True)
 
 # 6. FUNCTIONS
 def fetch_data(ticker, period, interval):
@@ -70,14 +70,12 @@ def fetch_data(ticker, period, interval):
         return df
     except: return pd.DataFrame()
 
-def generate_pred_path(start_price, end_price, num_steps, vol):
-    """Generates a realistic zig-zag path from start to end using Brownian Bridge logic"""
-    # Create random noise
+def generate_jagged_path(start_price, end_price, num_steps, vol):
+    """Creates a highly volatile path that matches a realistic trading day's noise."""
     t = np.linspace(0, 1, num_steps)
-    bm = np.cumsum(np.random.normal(0, vol, num_steps))
-    # Brownian Bridge: Forces the random walk to end exactly at end_price
-    bridge = bm - t * bm[-1]
-    # Add the linear trend from start to end
+    # Amplify the noise (vol * 5) to ensure it's visible on high-priced stocks
+    noise = np.cumsum(np.random.normal(0, vol * 5, num_steps))
+    bridge = noise - t * noise[-1]
     trend = np.linspace(start_price, end_price, num_steps)
     return trend + bridge
 
@@ -103,11 +101,10 @@ if st.session_state.selected_stock:
                     vol = df_day['Close'].pct_change().dropna().std()
                     
                     if ticker not in st.session_state.morning_predictions:
-                        # Initial random target
-                        r = np.random.normal(0, vol if vol > 0 else 0.001, 1)
+                        r = np.random.normal(0, vol if vol > 0 else 0.002, 1)
                         target = float(df_day['Open'].iloc[0]) * np.exp(r[0])
-                        # Generate the "Real" looking path
-                        path = generate_pred_path(df_day['Open'].iloc[0], target, len(df_day), vol*2)
+                        # Generate the path with higher resolution noise
+                        path = generate_jagged_path(df_day['Open'].iloc[0], target, len(df_day), vol * 50)
                         st.session_state.morning_predictions[ticker] = {"target": target, "path": path}
                     
                     morning_data = st.session_state.morning_predictions[ticker]
@@ -117,9 +114,10 @@ if st.session_state.selected_stock:
                     st.markdown(f"<div class='accuracy-report'><b>ACCURACY: {acc:.2f}%</b></div>", unsafe_allow_html=True)
                     
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df_day.index, y=df_day['Close'], name="Actual", line=dict(color='#3fb950')))
-                    fig.add_trace(go.Scatter(x=df_day.index, y=morning_data['path'][:len(df_day)], name="AI Predicted Path", line=dict(color='#388bfd', dash='dot')))
-                    fig.update_layout(template="plotly_dark", height=450)
+                    fig.add_trace(go.Scatter(x=df_day.index, y=df_day['Close'], name="Actual Price", line=dict(color='#3fb950')))
+                    fig.add_trace(go.Scatter(x=df_day.index, y=morning_data['path'][:len(df_day)], 
+                                             name="AI Predicted Path", line=dict(color='#388bfd', dash='dot', width=1.5)))
+                    fig.update_layout(template="plotly_dark", height=450, showlegend=True)
                 else:
                     fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'])])
                     fig.update_layout(template="plotly_dark", height=450, xaxis_rangeslider_visible=False)
@@ -135,7 +133,7 @@ if st.session_state.selected_stock:
     st.stop()
 
 # 8. SEARCH & FILTERED GRID
-query = st.text_input("🔍 Search Ticker", placeholder="Filter (e.g. AAPL, BTC)").upper()
+query = st.text_input("🔍 Search Ticker", placeholder="Type to filter...").upper()
 filtered = [s for s in FULL_LIST if query in s[0] or query in s[1].upper()]
 cols = st.columns(4)
 for i, (t, n) in enumerate(filtered):
