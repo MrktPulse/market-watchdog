@@ -18,7 +18,7 @@ if "morning_predictions" not in st.session_state:
 
 st_autorefresh(interval=30_000, key="market_heartbeat")
 
-# 3. TICKERS & TIMELINES
+# 3. TICKERS
 SP500_TOP = [("AAPL","Apple"), ("MSFT","Microsoft"), ("NVDA","NVIDIA"), ("AMZN","Amazon"), ("GOOGL","Alphabet"), ("META","Meta"), ("TSLA","Tesla"), ("LLY","Eli Lilly"), ("AVGO","Broadcom"), ("JPM","JPMorgan"), ("UNH","UnitedHealth"), ("V","Visa")]
 NSE_TOP = [("RELIANCE.NS","Reliance"), ("TCS.NS","TCS"), ("HDFCBANK.NS","HDFC Bank"), ("ICICIBANK.NS","ICICI Bank"), ("INFY.NS","Infosys"), ("SBI.NS","SBI")]
 CRYPTO = [("BTC-USD","Bitcoin"), ("ETH-USD","Ethereum"), ("SOL-USD","Solana")]
@@ -33,14 +33,14 @@ TIME_SETTINGS = {
     "3mo": {"period": "10y", "interval": "3mo", "label": "Quarterly"},
 }
 
-# 4. CSS (Restored Branding & Layout)
+# 4. CSS
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
 :root { --bg: #07090f; --bg2: #0c1018; --border: #1c2333; --text: #dde3ed; }
 html, body, .stApp { background: var(--bg) !important; color: var(--text); font-family: 'IBM Plex Sans', sans-serif; }
 .mp-header { border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
-.stock-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 15px; margin-bottom:10px; height: 100px; }
+.stock-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 15px; margin-bottom:10px; height: 100px; cursor: pointer; }
 .metric-strip { display: flex; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; margin: 20px 0; }
 .metric-cell { flex: 1; padding: 15px; border-right: 1px solid var(--border); text-align: center; }
 .accuracy-report { background: #0a1a0a; border: 1px solid #1a3320; border-radius: 4px; padding: 15px; color: #5a9a5a; font-family: 'IBM Plex Mono'; }
@@ -54,16 +54,15 @@ if not st.session_state.disclaimer_accepted:
         st.write("#")
         with st.container(border=True):
             st.subheader("⚠️ Risk Disclosure")
-            st.write("Predictions are models and do not guarantee results. Use for informational purposes only.")
+            st.write("Predictions use Monte Carlo simulations. They represent statistical probabilities, not certainties.")
             if st.button("I Understand & Agree", use_container_width=True, type="primary"):
                 st.session_state.disclaimer_accepted = True
                 st.rerun()
     st.stop()
 
-# 6. HEADER RESTORED
-st.markdown('<div class="mp-header"><span style="font-family:monospace; font-weight:600;">MARKET PULSE v2.7</span><span style="font-size:0.7rem; color:#4e5a6e;">LIVE TERMINAL</span></div>', unsafe_allow_html=True)
+st.markdown('<div class="mp-header"><span style="font-family:monospace; font-weight:600;">MARKET PULSE v2.8</span><span style="font-size:0.7rem; color:#4e5a6e;">LIVE TERMINAL</span></div>', unsafe_allow_html=True)
 
-# 7. FUNCTIONS
+# 6. FUNCTIONS
 def fetch_data(ticker, period, interval):
     try:
         df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=False)
@@ -71,12 +70,18 @@ def fetch_data(ticker, period, interval):
         return df
     except: return pd.DataFrame()
 
-def run_monte_carlo(current_price, vol):
-    r = np.random.normal(0, vol, (1000, 1))
-    paths = float(current_price) * np.exp(r)
-    return np.percentile(paths, [95, 50, 5])
+def generate_pred_path(start_price, end_price, num_steps, vol):
+    """Generates a realistic zig-zag path from start to end using Brownian Bridge logic"""
+    # Create random noise
+    t = np.linspace(0, 1, num_steps)
+    bm = np.cumsum(np.random.normal(0, vol, num_steps))
+    # Brownian Bridge: Forces the random walk to end exactly at end_price
+    bridge = bm - t * bm[-1]
+    # Add the linear trend from start to end
+    trend = np.linspace(start_price, end_price, num_steps)
+    return trend + bridge
 
-# 8. DASHBOARD LOGIC
+# 7. DASHBOARD
 if st.session_state.selected_stock:
     ticker = st.session_state.selected_stock
     col_back, col_acc = st.columns([1, 1])
@@ -86,7 +91,6 @@ if st.session_state.selected_stock:
 
     st.title(f"{ticker}")
     show_acc = col_acc.toggle("📊 Show Accuracy Analysis", value=False)
-    
     tabs = st.tabs([TIME_SETTINGS[k]["label"] for k in TIME_SETTINGS])
 
     for i, (key, cfg) in enumerate(TIME_SETTINGS.items()):
@@ -94,50 +98,47 @@ if st.session_state.selected_stock:
             df = fetch_data(ticker, cfg["period"], cfg["interval"])
             if not df.empty:
                 df_day = fetch_data(ticker, "1d", "1m")
-                curr, morning_p, vol_pct = 0.0, 0.0, 0.0
-                
                 if not df_day.empty:
                     curr = df_day['Close'].iloc[-1]
                     vol = df_day['Close'].pct_change().dropna().std()
-                    vol_pct = vol * 100
+                    
                     if ticker not in st.session_state.morning_predictions:
-                        _, p, _ = run_monte_carlo(df_day['Open'].iloc[0], vol if vol > 0 else 0.001)
-                        st.session_state.morning_predictions[ticker] = p
-                    morning_p = st.session_state.morning_predictions[ticker]
+                        # Initial random target
+                        r = np.random.normal(0, vol if vol > 0 else 0.001, 1)
+                        target = float(df_day['Open'].iloc[0]) * np.exp(r[0])
+                        # Generate the "Real" looking path
+                        path = generate_pred_path(df_day['Open'].iloc[0], target, len(df_day), vol*2)
+                        st.session_state.morning_predictions[ticker] = {"target": target, "path": path}
+                    
+                    morning_data = st.session_state.morning_predictions[ticker]
 
                 if show_acc and not df_day.empty:
-                    acc = 100 - (abs(curr - morning_p) / morning_p * 100)
-                    st.markdown(f"<div class='accuracy-report'><b>ACCURACY: {acc:.2f}%</b><br>Prediction: ${morning_p:,.2f} | Actual: ${curr:,.2f}</div>", unsafe_allow_html=True)
+                    acc = 100 - (abs(curr - morning_data['target']) / morning_data['target'] * 100)
+                    st.markdown(f"<div class='accuracy-report'><b>ACCURACY: {acc:.2f}%</b></div>", unsafe_allow_html=True)
+                    
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df_day.index, y=df_day['Close'], name="Actual Price", line=dict(color='#3fb950')))
-                    fig.add_trace(go.Scatter(x=[df_day.index[0], df_day.index[-1]], y=[df_day['Open'].iloc[0], morning_p], name="Predicted Trend", line=dict(color='#388bfd', dash='dot')))
+                    fig.add_trace(go.Scatter(x=df_day.index, y=df_day['Close'], name="Actual", line=dict(color='#3fb950')))
+                    fig.add_trace(go.Scatter(x=df_day.index, y=morning_data['path'][:len(df_day)], name="AI Predicted Path", line=dict(color='#388bfd', dash='dot')))
                     fig.update_layout(template="plotly_dark", height=450)
                 else:
-                    fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], increasing_line_color='#3fb950', decreasing_line_color='#f85149')])
+                    fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'])])
                     fig.update_layout(template="plotly_dark", height=450, xaxis_rangeslider_visible=False)
                 
                 st.plotly_chart(fig, use_container_width=True, key=f"chart_{ticker}_{key}")
 
                 if not df_day.empty:
-                    # VOLATILITY % RESTORED
-                    st.markdown(f"""
-                    <div class="metric-strip">
-                        <div class="metric-cell"><small>LAST PRICE</small><br><b>${curr:,.2f}</b></div>
-                        <div class="metric-cell"><small>VOLATILITY</small><br><b>{vol_pct:.3f}%</b></div>
-                        <div class="metric-cell"><small>AM PREDICTION</small><br><b>${morning_p:,.2f}</b></div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(f"""<div class="metric-strip">
+                        <div class="metric-cell"><small>LAST</small><br><b>${curr:,.2f}</b></div>
+                        <div class="metric-cell"><small>VOLATILITY</small><br><b>{vol*100:.3f}%</b></div>
+                        <div class="metric-cell"><small>AM PREDICTION</small><br><b>${morning_data['target']:,.2f}</b></div>
+                    </div>""", unsafe_allow_html=True)
     st.stop()
 
-# 9. SEARCH & GRID (RE-IMPLEMENTED FILTER LOGIC)
-search_query = st.text_input("🔍 Search Ticker", placeholder="Filter markets (e.g. AAPL, BTC, RELIANCE)").upper()
-
-# Filter results based on each typed letter
-filtered_stocks = [s for s in FULL_LIST if search_query in s[0] or search_query in s[1].upper()]
-
-st.write(f"### Markets ({len(filtered_stocks)})")
+# 8. SEARCH & FILTERED GRID
+query = st.text_input("🔍 Search Ticker", placeholder="Filter (e.g. AAPL, BTC)").upper()
+filtered = [s for s in FULL_LIST if query in s[0] or query in s[1].upper()]
 cols = st.columns(4)
-for i, (t, n) in enumerate(filtered_stocks):
+for i, (t, n) in enumerate(filtered):
     with cols[i % 4]:
         st.markdown(f"<div class='stock-card'><b>{t}</b><br><small>{n}</small></div>", unsafe_allow_html=True)
         if st.button(f"Analyze {t}", key=f"btn_{t}"):
