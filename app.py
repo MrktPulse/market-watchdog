@@ -551,7 +551,6 @@ def equity_fig(result: dict) -> go.Figure:
     fig = go.Figure(go.Scatter(y=result["equity_curve"], mode="lines", fill="tozeroy", line=dict(color="#3dd163")))
     fig.update_layout(template="plotly_dark", height=220, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#06080d", font=CHART_FONT, showlegend=False)
     return fig
-
 # ══════════════════════════════════════════════════════════════════════
 # 10. DISCLAIMER GATE
 # ══════════════════════════════════════════════════════════════════════
@@ -582,22 +581,20 @@ if not st.session_state.disclaimer_accepted:
         </div>
         <div style="font-size:.68rem;color:#48566a;font-family:'IBM Plex Mono',monospace;
                     border-top:1px solid #192030;padding-top:16px;margin-bottom:20px;">
-          By clicking "I Agree" you acknowledge you have read and understood this disclosure.
+          By clicking "I Agree" below, you acknowledge you have read and understood this disclosure.
         </div>
       </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # This column setup centers the Streamlit button over the overlay
+    # Centers the functional Streamlit button over the HTML overlay
     _, col_btn, _ = st.columns([1.9, 1, 1.9])
     with col_btn:
-        # THE "I AGREE" BUTTON
         if st.button("I Agree", key="disc_accept", use_container_width=True):
             st.session_state.disclaimer_accepted = True
             st.rerun()
             
-    st.stop() # Prevents the rest of the app from loading until button is clicked
-
+    st.stop() # Stops execution here until the button is clicked
 # ══════════════════════════════════════════════════════════════════════
 # 11. PERSISTENT HEADER
 # ══════════════════════════════════════════════════════════════════════
