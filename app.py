@@ -664,43 +664,6 @@ def equity_fig(result: dict) -> go.Figure:
     )
     return fig
 
-# ══════════════════════════════════════════════════════════════════════
-# 10. DISCLAIMER  — RESTORED
-# ══════════════════════════════════════════════════════════════════════
-if not st.session_state.disclaimer_accepted:
-    st.markdown("""
-    <div class="disc-overlay">
-      <div class="disc-box">
-        <div class="disc-title">Market Pulse Terminal</div>
-        <div class="disc-sub">⚠ Important Disclaimer</div>
-        <div class="disc-body">
-          This platform is provided <b>for informational and educational purposes only</b>.
-          All data, charts, predictions, and backtests are generated automatically and
-          <b>do not constitute financial advice</b>.<br><br>
-          Past performance is <b>not indicative of future results</b>. Simulated backtest
-          results have inherent limitations and may not reflect real-world trading outcomes
-          due to slippage, commissions, liquidity constraints, or data errors.<br><br>
-          <b>Never invest money you cannot afford to lose.</b> Always consult a qualified
-          financial adviser before making investment decisions.
-        </div>
-        <div class="disc-warn">
-          ● Predictions use a Monte Carlo simulation — they are probabilistic estimates, not guarantees.<br>
-          ● Volatility caps are applied to prevent unrealistic ranges.<br>
-          ● Crypto assets are subject to extreme volatility and regulatory risk.
-        </div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("### ⚠ Disclaimer — Please Read Before Continuing")
-    st.markdown(
-        "This platform is for **educational purposes only** and does not constitute financial advice. "
-        "All predictions and backtests are simulated and carry no guarantee of accuracy or future performance."
-    )
-    if st.button("✓  I understand — Enter Terminal", type="primary"):
-        st.session_state.disclaimer_accepted = True
-        st.rerun()
-    st.stop()
 
 # ══════════════════════════════════════════════════════════════════════
 # 11. PERSISTENT HEADER
