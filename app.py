@@ -555,46 +555,30 @@ def equity_fig(result: dict) -> go.Figure:
 # 10. DISCLAIMER GATE
 # ══════════════════════════════════════════════════════════════════════
 if not st.session_state.disclaimer_accepted:
+    # 1. This displays the visual box
     st.markdown("""
     <div class="disc-overlay">
-      <div class="disc-box">
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:.62rem;
-                    color:#48566a;letter-spacing:.2em;text-transform:uppercase;margin-bottom:8px;">
-          Market Pulse · Risk Disclosure
+        <div class="disc-box">
+            <h3 style="margin-top:0; color:#d8e0ec; font-family:'IBM Plex Mono';">Risk Disclosure</h3>
+            <p style="color:#7a8ba0; font-size:0.9rem; line-height:1.6;">
+                Educational use only. Not financial advice. Projections are statistical 
+                probabilities based on historical volatility caps. By clicking below, 
+                you acknowledge that you understand the risks involved in trading.
+            </p>
+            <div style="height:20px;"></div>
         </div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:1.05rem;
-                    font-weight:600;color:#d8e0ec;margin-bottom:20px;">
-          Not Financial Advice
-        </div>
-        <div style="font-size:.86rem;color:#7a8ba0;line-height:1.9;
-                    font-family:'IBM Plex Sans',sans-serif;margin-bottom:28px;">
-          The data, charts, projections, and strategy simulations on this platform
-          are provided <strong style="color:#d8e0ec;font-weight:500">for educational
-          and informational purposes only</strong>. Nothing here constitutes financial
-          or investment advice.<br><br>
-          Strategy backtests use <strong style="color:#d8e0ec;font-weight:500">real
-          historical data</strong> but past performance does not guarantee future results.
-          Monte Carlo projections are bounded by asset-class volatility caps to prevent
-          unrealistic outputs.<br><br>
-          All simulated capital figures are hypothetical. Always consult a qualified
-          financial professional before making real investment decisions.
-        </div>
-        <div style="font-size:.68rem;color:#48566a;font-family:'IBM Plex Mono',monospace;
-                    border-top:1px solid #192030;padding-top:16px;margin-bottom:20px;">
-          By clicking "I Agree" below, you acknowledge you have read and understood this disclosure.
-        </div>
-      </div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Centers the functional Streamlit button over the HTML overlay
-    _, col_btn, _ = st.columns([1.9, 1, 1.9])
+
+    # 2. This creates the actual functional button to get you past the screen
+    _, col_btn, _ = st.columns([2, 1, 2])
     with col_btn:
-        if st.button("I Agree", key="disc_accept", use_container_width=True):
+        if st.button("I AGREE & ENTER", use_container_width=True, type="primary"):
             st.session_state.disclaimer_accepted = True
             st.rerun()
-            
-    st.stop() # Stops execution here until the button is clicked
+    
+    # 3. This prevents the rest of the app from loading until you click
+    st.stop()
 # ══════════════════════════════════════════════════════════════════════
 # 11. PERSISTENT HEADER
 # ══════════════════════════════════════════════════════════════════════
