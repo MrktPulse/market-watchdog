@@ -551,34 +551,7 @@ def equity_fig(result: dict) -> go.Figure:
     fig = go.Figure(go.Scatter(y=result["equity_curve"], mode="lines", fill="tozeroy", line=dict(color="#3dd163")))
     fig.update_layout(template="plotly_dark", height=220, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#06080d", font=CHART_FONT, showlegend=False)
     return fig
-# ══════════════════════════════════════════════════════════════════════
-# 10. DISCLAIMER GATE
-# ══════════════════════════════════════════════════════════════════════
-if not st.session_state.disclaimer_accepted:
-    # 1. This displays the visual box
-    st.markdown("""
-    <div class="disc-overlay">
-        <div class="disc-box">
-            <h3 style="margin-top:0; color:#d8e0ec; font-family:'IBM Plex Mono';">Risk Disclosure</h3>
-            <p style="color:#7a8ba0; font-size:0.9rem; line-height:1.6;">
-                Educational use only. Not financial advice. Projections are statistical 
-                probabilities based on historical volatility caps. By clicking below, 
-                you acknowledge that you understand the risks involved in trading.
-            </p>
-            <div style="height:20px;"></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
 
-    # 2. This creates the actual functional button to get you past the screen
-    _, col_btn, _ = st.columns([2, 1, 2])
-    with col_btn:
-        if st.button("I AGREE & ENTER", use_container_width=True, type="primary"):
-            st.session_state.disclaimer_accepted = True
-            st.rerun()
-    
-    # 3. This prevents the rest of the app from loading until you click
-    st.stop()
 # ══════════════════════════════════════════════════════════════════════
 # 11. PERSISTENT HEADER
 # ══════════════════════════════════════════════════════════════════════
